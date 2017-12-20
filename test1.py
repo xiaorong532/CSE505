@@ -148,6 +148,7 @@ class Solver:
             # print atom
             if atom.name == "move" and len(atom.arguments) == 4:
                 c, x, y, t = [(n.number if n.type == clingo.SymbolType.Number else str(n)) for n in atom.arguments]
+                # c, x, y, t = [str(n) for n in atom.arguments]
                 self.__solution.append((c, x, y, t))
         self.__solution.sort(key=lambda x: x[3])
         p = None
@@ -161,12 +162,18 @@ class Solver:
             p = x
             i += 1
         del self.__solution[i:]
+        for n in self.__solution:
+            print 'move' + str(n)
 
 board  = Board()
-board.current_target = ("yellow", '',14,12)
-solver = Solver(horizon = 10)
-solver.start(board)
-while solver.busy():
-    time.sleep(5)
-solution = solver.get()
-print solution
+solver = Solver(horizon = 20)
+sequences = [("yellow", '',14,12), ("blue", '', 11, 2)]
+for target in sequences:
+    board.current_target = target
+    solver.start(board)
+    while solver.busy():
+        time.sleep(5)
+    solution = solver.get()
+    print solution
+    for (r, dx, dy, T) in solution:
+        board.move(r, dx, dy)
