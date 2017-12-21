@@ -1,71 +1,6 @@
 import clingo
 import time
 
-class Board:
-    def __init__(self):
-        self.size           = 1
-        self.blocked        = set()
-        self.barriers       = set()
-        self.targets        = set()
-        self.pos            = dict()
-        self.robots         = [{}]
-        self.moves          = []
-        self.current_target = None
-        self.solution       = None
-
-        ctl = clingo.Control()
-        ctl.load("board.lp")
-        ctl.ground([("base", [])])
-        ctl.solve(on_model=self.__on_model)
-
-    def __on_model(self, m):
-        for atom in m.symbols(atoms=True):
-            if atom.name == "barrier" and len(atom.arguments) == 4:
-                x, y, dx, dy = [n.number for n in atom.arguments]
-                self.blocked.add((x - 1     , y - 1     ,  dx,  dy))
-                self.blocked.add((x - 1 + dx, y - 1     , -dx,  dy))
-                self.blocked.add((x - 1     , y - 1 + dy,  dx, -dy))
-                self.blocked.add((x - 1 + dx, y - 1 + dy, -dx, -dy))
-                if dy == 0:
-                    self.barriers.add(('west', x if dx == 1 else x - 1, y - 1))
-                else:
-                    self.barriers.add(('north', x - 1, y if dy == 1 else y - 1))
-            elif atom.name == "dim" and len(atom.arguments) == 1:
-                self.size = max(self.size, atom.arguments[0].number)
-            elif atom.name == "available_target" and len(atom.arguments) == 4:
-                c, s, x, y = [(n.number if n.type == clingo.SymbolType.Number else str(n)) for n in atom.arguments]
-                self.targets.add((c, s, x - 1, y - 1))
-            elif atom.name == "initial_pos" and len(atom.arguments) == 3:
-                c, x, y = [(n.number if n.type == clingo.SymbolType.Number else str(n)) for n in atom.arguments]
-                self.pos[c] = (x - 1, y - 1)
-        for d in range(0, self.size):
-            self.blocked.add((d            ,             0,  0, -1))
-            self.blocked.add((d            , self.size - 1,  0,  1))
-            self.blocked.add((0            ,             d, -1,  0))
-            self.blocked.add((self.size - 1,             d,  1,  0))
-
-    def move(self, robot, dx, dy):
-        x, y = self.pos[robot]
-        while (not (x, y, dx, dy) in self.blocked and
-                not (x + dx, y + dy) in self.pos.values()):
-            x += dx
-            y += dy
-        self.pos[robot] = (x, y)
-        if (self.solution is not None and
-                len(self.solution) > 0 and
-                self.solution[0][0] == robot and
-                self.solution[0][1] == dx and
-                self.solution[0][2] == dy):
-            self.solution.pop(0)
-            if len(self.solution) == 0:
-                self.solution = None
-        else:
-            self.solution = None
-
-    def won(self):
-        r, _, x, y = self.current_target
-        return self.pos[r] == (x, y)
-
 class Solver:
     def __init__(self, horizon=0):
         self.__horizon = horizon
@@ -73,6 +8,7 @@ class Solver:
         self.__future = None
         self.__solution = None
         self.__assign = []
+        self.__last_position = dict()
 
         self.__prg.load("board.lp")
         self.__prg.load("ricochet.lp")
@@ -85,6 +21,7 @@ class Solver:
                          , ("check", [t])
                          , ("state", [t])
                          ])
+        # print parts
         self.__prg.ground(parts)
         self.__prg.assign_external(clingo.Function("horizon", [self.__horizon]), True)
 
@@ -98,16 +35,16 @@ class Solver:
                           ])
         self.__prg.assign_external(clingo.Function("horizon", [self.__horizon]), True)
 
-    def start(self, board):
+    def start(self, pos, target):
         self.__assign = []
-        for robot, (x, y) in board.pos.items():
-            # print x,y
-            self.__assign.append(clingo.Function("pos", [clingo.Function(robot), x+1, y+1, 0]))
-        print board.current_target[0]
-        self.__assign.append(clingo.Function("target",
-            [ clingo.Function(board.current_target[0])
-            , board.current_target[2] + 1
-            , board.current_target[3] + 1
+        for (robot, x, y) in pos:
+            self.__last_position[robot] = (x, y)
+            self.__assign.append(clingo.Function("pos", [clingo.Function(robot), x, y, 0]))
+        print target
+        self.__assign.append(clingo.Function("target", 
+            [ clingo.Function(target[0]),
+            target[1],
+            target[2]
             ]))
         for x in self.__assign:
             self.__prg.assign_external(x, True)
@@ -165,15 +102,22 @@ class Solver:
         for n in self.__solution:
             print 'move' + str(n)
 
-board  = Board()
+    def move(self, robot, dx, dy):
+        (x, y) = self.__last_position[robot]
+        x += dx
+        y += dy
+        self.__last_position[robot] = (x, y)
+
 solver = Solver(horizon = 20)
-sequences = [("yellow", '',14,12), ("blue", '', 11, 2)]
+initial_pos = [("red", 1, 1), ("blue",1,16), ("green",16,1), ("yellow",16,16)]
+sequences = [("yellow", 15,13), ("blue", 12, 3)]
+# sequences = [("yellow",15,13)]
 for target in sequences:
-    board.current_target = target
-    solver.start(board)
+    solver.start(initial_pos, target)
     while solver.busy():
         time.sleep(5)
     solution = solver.get()
     print solution
+    # change position for next round
     for (r, dx, dy, T) in solution:
-        board.move(r, dx, dy)
+        solver.move(r, dx, dy)
